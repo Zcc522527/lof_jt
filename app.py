@@ -2,6 +2,7 @@
 LOF 基金套利监控系统
 作者: 墨菲特
 功能: 监控 LOF 基金的场外申购、场内卖出套利机会
+修改: 集成健壮的数据获取机制，解决连接中断问题
 """
 
 import streamlit as st
@@ -13,6 +14,11 @@ import logging
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+import time
+
 warnings.filterwarnings('ignore')
 
 # 配置日志
@@ -39,6 +45,182 @@ if not os.path.exists(CACHE_DIR):
     logger.info(f"📁 创建缓存目录: {CACHE_DIR}")
 
 
+# ==================== 健壮的数据获取类 ====================
+
+class RobustDataFetcher:
+    """健壮的数据获取器，带多重降级策略"""
+    
+    def __init__(self):
+        self.session = self._create_session()
+        
+    @staticmethod
+    def _create_session():
+        """创建带重试和连接池的会话"""
+        session = requests.Session()
+        
+        # 更激进的重试策略
+        retry_strategy = Retry(
+            total=10,
+            backoff_factor=3,
+            status_forcelist=[429, 500, 502, 503, 504, 520, 522, 524],
+            allowed_methods=["HEAD", "GET", "POST", "OPTIONS"],
+            raise_on_status=False
+        )
+        
+        adapter = HTTPAdapter(
+            max_retries=retry_strategy,
+            pool_connections=50,
+            pool_maxsize=50,
+            pool_block=False
+        )
+        
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        
+        # 设置默认请求头（模拟真实浏览器）
+        session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/javascript, */*; q=0.01',
+            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            'Referer': 'http://fund.eastmoney.com/',
+            'X-Requested-With': 'XMLHttpRequest'
+        })
+        
+        return session
+    
+    def fetch_lof_data_direct(self, max_attempts=5):
+        """直接调用东方财富 API（绕过 Akshare）"""
+        url = "http://push2.eastmoney.com/api/qt/clist/get"
+        
+        params = {
+            'pn': '1',
+            'pz': '5000',
+            'po': '1',
+            'np': '1',
+            'ut': 'bd1d9ddb04089700cf9c27f6f7426281',
+            'fltt': '2',
+            'invt': '2',
+            'fid': 'f3',
+            'fs': 'm:8+t:2',
+            'fields': 'f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23,f24,f25,f26,f22,f11,f62,f128,f136,f115,f152',
+            '_': str(int(time.time() * 1000))
+        }
+        
+        for attempt in range(max_attempts):
+            try:
+                logger.info(f"🔄 尝试 {attempt + 1}/{max_attempts} - 直接调用东方财富 API")
+                
+                response = self.session.get(
+                    url,
+                    params=params,
+                    timeout=(30, 90),
+                    verify=True
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    
+                    if data.get('data') and data['data'].get('diff'):
+                        df = pd.DataFrame(data['data']['diff'])
+                        
+                        # 重命名列
+                        column_mapping = {
+                            'f12': '基金代码',
+                            'f14': '基金名称',
+                            'f2': '场内价格',
+                            'f6': '场内成交额',
+                        }
+                        
+                        df = df.rename(columns=column_mapping)
+                        
+                        # 选择需要的列
+                        required_cols = [col for col in column_mapping.values() if col in df.columns]
+                        df = df[required_cols]
+                        
+                        # 数据类型转换
+                        df['场内价格'] = pd.to_numeric(df['场内价格'], errors='coerce')
+                        df['场内成交额'] = pd.to_numeric(df['场内成交额'], errors='coerce')
+                        
+                        logger.info(f"✅ 直接 API 成功获取 {len(df)} 条数据")
+                        return df
+                
+                logger.warning(f"⚠️ API 返回状态码: {response.status_code}")
+                
+            except requests.exceptions.Timeout:
+                logger.warning(f"⏱️ 请求超时 (尝试 {attempt + 1}/{max_attempts})")
+                if attempt < max_attempts - 1:
+                    time.sleep((attempt + 1) * 5)
+                
+            except Exception as e:
+                logger.error(f"❌ 错误: {str(e)}")
+                if attempt < max_attempts - 1:
+                    wait_time = (attempt + 1) * 8
+                    logger.info(f"⏳ {wait_time}秒后重试...")
+                    time.sleep(wait_time)
+        
+        return None
+    
+    def fetch_via_akshare(self):
+        """尝试使用 Akshare（备用方案）"""
+        try:
+            logger.info("📊 尝试使用 Akshare 库...")
+            df = ak.fund_lof_spot_em()
+            
+            # 重命名列
+            df = df.rename(columns={
+                '代码': '基金代码',
+                '名称': '基金名称',
+                '最新价': '场内价格',
+                '成交额': '场内成交额'
+            })
+            
+            # 数据类型转换
+            df['场内价格'] = pd.to_numeric(df['场内价格'], errors='coerce')
+            df['场内成交额'] = pd.to_numeric(df['场内成交额'], errors='coerce')
+            
+            # 只保留需要的列
+            df = df[['基金代码', '基金名称', '场内价格', '场内成交额']]
+            
+            logger.info(f"✅ Akshare 成功获取 {len(df)} 条数据")
+            return df
+            
+        except Exception as e:
+            logger.error(f"❌ Akshare 失败: {str(e)}")
+            return None
+    
+    def get_market_data(self):
+        """多重降级策略获取市场数据"""
+        strategies = [
+            ("直接 API 调用", self.fetch_lof_data_direct),
+            ("Akshare 库", self.fetch_via_akshare),
+        ]
+        
+        for strategy_name, fetch_func in strategies:
+            try:
+                st.info(f"🔍 正在尝试: {strategy_name}")
+                df = fetch_func()
+                
+                if df is not None and not df.empty:
+                    st.success(f"✅ {strategy_name} 成功！获取 {len(df)} 条LOF数据")
+                    return df
+                    
+            except Exception as e:
+                st.warning(f"⚠️ {strategy_name} 失败: {str(e)}")
+                continue
+        
+        return None
+
+
+@st.cache_resource
+def get_data_fetcher():
+    """获取全局数据获取器单例"""
+    return RobustDataFetcher()
+
+
+# ==================== 原有函数 ====================
+
 def load_nav_cache(cache_date):
     """加载指定日期的净值缓存"""
     cache_file = os.path.join(CACHE_DIR, f"nav_cache_{cache_date}.json")
@@ -58,13 +240,12 @@ def save_nav_cache(cache_date, nav_dict):
     """保存净值缓存到文件"""
     cache_file = os.path.join(CACHE_DIR, f"nav_cache_{cache_date}.json")
     try:
-        # 确保所有值都可以被JSON序列化（转换日期为字符串）
         serializable_dict = {}
         for code, data in nav_dict.items():
             serializable_dict[code] = {
                 '基金代码': str(data['基金代码']),
                 '基金净值': float(data['基金净值']),
-                '净值日期': str(data['净值日期'])  # 确保日期是字符串
+                '净值日期': str(data['净值日期'])
             }
         
         with open(cache_file, 'w', encoding='utf-8') as f:
@@ -98,24 +279,30 @@ def fetch_single_nav(fund_code, start_date, end_date):
 
 
 def get_lof_data():
-    """获取 LOF 基金实时数据"""
+    """获取 LOF 基金实时数据 - 使用健壮的数据获取方法"""
     if not AKSHARE_AVAILABLE:
         logger.error("❌ Akshare 模块未安装，无法获取数据")
         st.error("❌ Akshare 未安装，请先安装：`pip install akshare`")
         return None
     
     try:
-        # ========== 步骤 1：获取LOF场内行情列表 ==========
-        logger.info("🔍 [步骤1/3] 开始调用 Akshare API: fund_lof_spot_em() - 获取 LOF 场内行情")
+        # ========== 步骤 1：获取LOF场内行情列表（使用健壮方法）==========
+        logger.info("🔍 [步骤1/3] 开始获取 LOF 场内行情")
         
-        df_market = ak.fund_lof_spot_em()
+        fetcher = get_data_fetcher()
+        df_market = fetcher.get_market_data()
+        
+        if df_market is None or df_market.empty:
+            st.error("❌ 所有数据获取策略均失败，无法获取LOF行情数据")
+            logger.error("❌ 无法获取LOF行情数据")
+            return None
         
         logger.info(f"📊 场内行情数据行数: {len(df_market)}")
         logger.info(f"📋 场内行情列名: {df_market.columns.tolist()}")
         logger.info(f"\n📄 前 3 条原始数据:\n{df_market.head(3).to_string()}")
         
         # 检查必需的列
-        required_columns = ['代码', '名称', '最新价', '成交额']
+        required_columns = ['基金代码', '基金名称', '场内价格', '场内成交额']
         missing_columns = [col for col in required_columns if col not in df_market.columns]
         
         if missing_columns:
@@ -124,20 +311,6 @@ def get_lof_data():
             st.error(f"❌ {error_msg}")
             return None
         
-        # 重命名列
-        df_market = df_market.rename(columns={
-            '代码': '基金代码',
-            '名称': '基金名称',
-            '最新价': '场内价格',
-            '成交额': '场内成交额'
-        })
-        
-        # 数据类型转换
-        df_market['场内价格'] = pd.to_numeric(df_market['场内价格'], errors='coerce')
-        df_market['场内成交额'] = pd.to_numeric(df_market['场内成交额'], errors='coerce')
-        
-        # 只保留需要的列
-        df_market = df_market[['基金代码', '基金名称', '场内价格', '场内成交额']]
         logger.info(f"✅ 场内行情处理完成，共 {len(df_market)} 只 LOF")
         
         
@@ -232,7 +405,7 @@ def get_lof_data():
         # ========== 步骤 3：合并场内行情和净值数据 ==========
         logger.info("🔗 [步骤3/3] 合并场内行情和净值数据")
         
-        df = pd.merge(df_market, df_nav, on='基金代码', how='inner')  # 内连接，只保留有净值的
+        df = pd.merge(df_market, df_nav, on='基金代码', how='inner')
         
         logger.info(f"📊 合并后数据行数: {len(df)}")
         logger.info(f"\n📄 合并后前 5 条:\n{df.head().to_string()}")
@@ -240,7 +413,7 @@ def get_lof_data():
         # 添加辅助字段
         df['实时估值'] = df['基金净值']
         
-        # 标记无效数据（而不是删除）
+        # 标记无效数据
         df['数据状态'] = '正常'
         invalid_mask = (
             df['场内价格'].isna() | 
@@ -253,13 +426,12 @@ def get_lof_data():
         
         invalid_count = invalid_mask.sum()
         if invalid_count > 0:
-            logger.warning(f"⚠️ 发现无效数据: {invalid_count} 条（已标记，保留在全量表中）")
+            logger.warning(f"⚠️ 发现无效数据: {invalid_count} 条（已标记）")
         
         result_df = df[['基金代码', '基金名称', '场内价格', '基金净值', '实时估值', '场内成交额', '数据状态']]
         
         valid_count = len(df) - invalid_count
         logger.info(f"✅ 数据处理完成，共 {len(result_df)} 条数据（有效: {valid_count}，无效: {invalid_count}）")
-        logger.info(f"\n📊 最终数据前 5 条:\n{result_df.head().to_string()}")
         
         st.success(f"✅ 成功获取 {len(result_df)} 只 LOF 基金数据（有效: {valid_count}，无效: {invalid_count}）")
         
@@ -270,6 +442,21 @@ def get_lof_data():
         logger.error(f"❌ {error_msg}", exc_info=True)
         st.error(f"❌ {error_msg}")
         st.error(f"异常类型: {type(e).__name__}")
+        
+        # 显示帮助信息
+        with st.expander("💡 查看可能的解决方案"):
+            st.markdown("""
+            ### 可能的原因：
+            1. **网络连接问题** - Streamlit Cloud 访问国内 API 不稳定
+            2. **API 限流** - 请求过于频繁
+            3. **服务器维护** - 东方财富 API 临时不可用
+            
+            ### 解决建议：
+            1. 等待 5-10 分钟后点击"刷新数据"重试
+            2. 检查网络连接
+            3. 如问题持续，请联系开发者
+            """)
+        
         return None
 
 
@@ -281,7 +468,6 @@ def calculate_premium_rate(df):
 
 def filter_opportunities(df, min_premium, min_turnover):
     """筛选套利机会"""
-    # 过滤条件（排除无效数据）
     filtered = df[
         (df['数据状态'] == '正常') &
         (df['溢价率(%)'] > min_premium) &
@@ -296,10 +482,8 @@ def highlight_premium_level(row):
     premium = row['溢价率(%)']
     
     if premium >= 5.0:
-        # 高溢价：红色高亮（鸡腿机会）
         return ['background-color: #ffcccc; font-weight: bold; color: #d32f2f'] * len(row)
     elif premium >= 2.0:
-        # 中等溢价：黄色高亮
         return ['background-color: #fff9c4; font-weight: bold; color: #f57c00'] * len(row)
     else:
         return [''] * len(row)
@@ -307,22 +491,17 @@ def highlight_premium_level(row):
 
 def highlight_with_invalid(row):
     """根据溢价率和数据状态高亮显示（用于全量表）"""
-    # 检查是否为无效数据
     if '数据状态' in row.index and row['数据状态'] == '数据无效':
-        # 无效数据：灰色背景
         return ['background-color: #e0e0e0; color: #757575; font-style: italic'] * len(row)
     
     premium = row['溢价率(%)']
     
-    # 处理 NaN 的情况
     if pd.isna(premium):
         return ['background-color: #e0e0e0; color: #757575; font-style: italic'] * len(row)
     
     if premium >= 5.0:
-        # 高溢价：红色高亮（鸡腿机会）
         return ['background-color: #ffcccc; font-weight: bold; color: #d32f2f'] * len(row)
     elif premium >= 2.0:
-        # 中等溢价：黄色高亮
         return ['background-color: #fff9c4; font-weight: bold; color: #f57c00'] * len(row)
     else:
         return [''] * len(row)
@@ -421,10 +600,12 @@ def main():
     # 刷新按钮
     col1, col2 = st.columns([1, 5])
     with col1:
-        if st.button("🔄 刷新数据", width="stretch"):
+        if st.button("🔄 刷新数据", use_container_width=True):
             # 清除缓存，强制重新获取
             if 'lof_data' in st.session_state:
                 del st.session_state['lof_data']
+            st.cache_data.clear()
+            st.cache_resource.clear()
             st.rerun()
     
     # 获取数据 (优先使用缓存)
@@ -436,6 +617,18 @@ def main():
     
     if 'lof_data' not in st.session_state or st.session_state['lof_data'] is None:
         st.error("❌ 无法获取数据，请检查网络连接或稍后重试")
+        
+        # 提供手动重试按钮
+        col1, col2, col3 = st.columns([1, 1, 3])
+        with col1:
+            if st.button("🔄 立即重试", type="primary", use_container_width=True):
+                st.rerun()
+        with col2:
+            if st.button("🗑️ 清除缓存", use_container_width=True):
+                st.cache_data.clear()
+                st.cache_resource.clear()
+                st.success("✅ 缓存已清除")
+        
         return
     
     # 使用缓存的原始数据进行计算
@@ -444,7 +637,7 @@ def main():
     # 计算溢价率
     df = calculate_premium_rate(df)
     
-    # 风险提示 (如果不免五)
+        # 风险提示 (如果不免五)
     if not is_free_five:
         st.warning(f"⚠️ **风险提示**：您的账户**未免五**。系统已自动在套利计算中扣除 **5 元**最低手续费，请确保单笔申购金额 {invest_amount} 元能覆盖成本。")
     
@@ -517,7 +710,7 @@ def main():
                 styled_df = styled_df.format(format_dict)
                 st.dataframe(
                     styled_df,
-                    width='stretch',
+                    use_container_width=True,
                     height=600,
                     hide_index=True
                 )
@@ -525,7 +718,7 @@ def main():
                 # 链接模式：显示可点击链接
                 st.dataframe(
                     filtered_df,
-                    width='stretch',
+                    use_container_width=True,
                     height=600,
                     hide_index=True,
                     column_config={
@@ -557,7 +750,8 @@ def main():
                 label="📥 导出筛选结果为 CSV",
                 data=csv,
                 file_name=f"LOF套利机会_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv"
+                mime="text/csv",
+                use_container_width=True
             )
             
         else:
@@ -585,7 +779,7 @@ def main():
             styled_all_df = styled_all_df.format(format_dict_all)
             st.dataframe(
                 styled_all_df,
-                width='stretch',
+                use_container_width=True,
                 height=600,
                 hide_index=True
             )
@@ -593,7 +787,7 @@ def main():
             # 链接模式：显示可点击链接
             st.dataframe(
                 df_sorted,
-                width='stretch',
+                use_container_width=True,
                 height=600,
                 hide_index=True,
                 column_config={
@@ -625,7 +819,8 @@ def main():
             label="📥 导出全量数据为 CSV",
             data=csv_all,
             file_name=f"LOF全量数据_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv"
+            mime="text/csv",
+            use_container_width=True
         )
     
     # 页脚
@@ -635,7 +830,7 @@ def main():
         <div style='text-align: center; color: gray;'>
             <p>⚠️ 风险提示：套利有风险，投资需谨慎。本系统仅供参考，不构成投资建议。</p>
             <p>📊 数据更新时间：{}</p>
-            <p>🔗 <a href="https://github.com/253506088/lof_jt" target="_blank">GitHub</a></p>
+            <p>🔗 <a href="https://github.com/Zcc522527/lof_jt" target="_blank">GitHub</a></p>
         </div>
         """.format(datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
         unsafe_allow_html=True
