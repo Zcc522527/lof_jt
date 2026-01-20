@@ -156,7 +156,8 @@ class RobustDataFetcher:
         except Exception as e:
             logger.error(f"❌ Akshare 失败: {str(e)}")
             return None
-    
+            
+    PROXY_URL = "misty-morning-49ef.zcc522527.workers.dev"
     def fetch_with_proxy(self, proxy_url):
         """通过 Cloudflare Workers 代理获取"""
         try:
