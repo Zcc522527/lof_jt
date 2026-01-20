@@ -157,9 +157,9 @@ class RobustDataFetcher:
             logger.error(f"❌ Akshare 失败: {str(e)}")
             return None
             
-    PROXY_URL = "misty-morning-49ef.zcc522527.workers.dev"
     def fetch_with_proxy(self, proxy_url):
         """通过 Cloudflare Workers 代理获取"""
+         PROXY_URL = "misty-morning-49ef.zcc522527.workers.dev"
         try:
             api_url = "http://push2.eastmoney.com/api/qt/clist/get"
             proxy_request = f"{proxy_url}?target={requests.utils.quote(api_url)}"
