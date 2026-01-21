@@ -1,22 +1,25 @@
 # Streamlit 核心
-streamlit>=1.28.0
+streamlit==1.31.0
 
 # 数据处理
-pandas>=2.0.0
-numpy>=1.24.0
+pandas==2.1.4
+numpy==1.26.3
+
+# 数据源
+akshare==1.13.5
 
 # HTTP 请求
-requests>=2.31.0
+requests==2.31.0
 
 # 数据库
-supabase>=2.0.0
+supabase==2.3.0
 
-# 数据源（任选，作为降级方案）
-akshare>=1.11.0
+# HTML 解析
+lxml==5.1.0
+beautifulsoup4==4.12.3
 
-# HTML解析（用于集思录）
-lxml>=4.9.0
-beautifulsoup4>=4.12.0
+# 环境变量
+python-dotenv==1.0.0
 
-#环境指标管理
-python-dotenv>=1.0.0
+# 其他依赖
+typing-extensions==4.9.0
