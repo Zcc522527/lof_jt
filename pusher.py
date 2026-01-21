@@ -2,7 +2,7 @@
 PushPlus 消息推送封装 - Render 部署版
 官网：https://www.pushplus.plus/
 功能：微信消息推送、套利提醒、日报推送
-版本：v3.0.0 - Render Optimized
+版本：v3.0.1 - 移除 Streamlit Secrets 依赖
 """
 
 import logging
@@ -38,7 +38,7 @@ class PushPlusNotifier:
         Args:
             token: PushPlus Token（可选，默认从环境变量读取）
         """
-        # 优先级：参数 > 环境变量
+        # 只从环境变量读取（移除 st.secrets 依赖）
         self.token = (
             token or 
             os.environ.get("PUSHPLUS_TOKEN") or 
@@ -56,7 +56,7 @@ class PushPlusNotifier:
             logger.info(f"   TOKEN 前缀: {token_prefix}")
         else:
             logger.info("   PUSHPLUS_TOKEN: ❌ 未设置")
-            logger.info("💡 推送功能不可用，如需启用请在 Render Dashboard 配置")
+            logger.info("💡 推送功能不可用，如需启用请在 Render Dashboard → Environment 配置")
         
         logger.info("=" * 60)
         
@@ -142,13 +142,7 @@ class PushPlusNotifier:
         发送套利机会提醒
         
         Args:
-            opportunities: 套利机会列表，每条包含：
-                - 基金代码 (fund_code)
-                - 基金名称 (fund_name)
-                - 场内价格 (market_price)
-                - 基金净值 (nav)
-                - 溢价率 (premium_rate)
-                - 成交额 (volume)
+            opportunities: 套利机会列表
         
         Returns:
             bool: True=成功，False=失败
@@ -166,15 +160,7 @@ class PushPlusNotifier:
         return self.send_message(title, content, template="html")
     
     def _build_arbitrage_html(self, opportunities: List[Dict]) -> str:
-        """
-        构建套利机会HTML消息
-        
-        Args:
-            opportunities: 套利机会列表
-        
-        Returns:
-            str: HTML内容
-        """
+        """构建套利机会HTML消息"""
         html = f"""
         <html>
         <head>
@@ -338,7 +324,7 @@ class PushPlusNotifier:
         # 添加页脚
         html += f"""
             <div class="footer">
-                <p>LOF套利监控系统 Pro v3.0.0</p>
+                <p>LOF套利监控系统 Pro v3.0.1</p>
                 <p>Powered by Akshare + Streamlit</p>
                 <p style="font-size: 12px; color: #9ca3af;">
                     {self._get_current_date()}
@@ -352,196 +338,63 @@ class PushPlusNotifier:
     
     def send_daily_summary(self, total_count: int, premium_count: int, 
                           max_premium: float, top_funds: List[Dict]) -> bool:
-        """
-        发送每日市场汇总
-        
-        Args:
-            total_count: LOF总数
-            premium_count: 鸡腿机会数量
-            max_premium: 最高溢价率
-            top_funds: TOP基金列表
-        
-        Returns:
-            bool: True=成功，False=失败
-        """
+        """发送每日市场汇总"""
         title = f"📊 LOF套利日报 - {self._get_current_date()}"
-        
         content = self._build_daily_summary_html(
             total_count, premium_count, max_premium, top_funds
         )
-        
         return self.send_message(title, content, template="html")
     
     def _build_daily_summary_html(self, total_count: int, premium_count: int,
                                   max_premium: float, top_funds: List[Dict]) -> str:
-        """
-        构建每日汇总HTML
-        
-        Args:
-            total_count: LOF总数
-            premium_count: 鸡腿机会数量
-            max_premium: 最高溢价率
-            top_funds: TOP基金列表
-        
-        Returns:
-            str: HTML内容
-        """
+        """构建每日汇总HTML"""
         html = f"""
         <html>
         <head>
             <meta charset="utf-8">
             <style>
-                body {{
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-                    line-height: 1.6;
-                    color: #333;
-                    max-width: 600px;
-                    margin: 0 auto;
-                    padding: 20px;
-                }}
-                .header {{
-                    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-                    color: white;
-                    padding: 20px;
-                    border-radius: 8px;
-                    text-align: center;
-                    margin-bottom: 20px;
-                }}
-                .stats {{
-                    display: grid;
-                    grid-template-columns: 1fr 1fr;
-                    gap: 15px;
-                    margin-bottom: 20px;
-                }}
-                .stat-card {{
-                    background: white;
-                    border: 1px solid #e5e7eb;
-                    border-radius: 8px;
-                    padding: 15px;
-                    text-align: center;
-                }}
-                .stat-value {{
-                    font-size: 32px;
-                    font-weight: bold;
-                    color: #667eea;
-                    margin: 10px 0;
-                }}
-                .stat-label {{
-                    font-size: 14px;
-                    color: #6b7280;
-                }}
-                .top-list {{
-                    background: white;
-                    border: 1px solid #e5e7eb;
-                    border-radius: 8px;
-                    padding: 15px;
-                    margin-bottom: 20px;
-                }}
-                .top-item {{
-                    padding: 10px;
-                    border-bottom: 1px solid #f3f4f6;
-                }}
-                .top-item:last-child {{
-                    border-bottom: none;
-                }}
+                body {{ font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }}
+                .header {{ background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 20px; border-radius: 8px; text-align: center; }}
+                .stats {{ display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 20px 0; }}
+                .stat-card {{ background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px; text-align: center; }}
+                .stat-value {{ font-size: 32px; font-weight: bold; color: #667eea; margin: 10px 0; }}
             </style>
         </head>
         <body>
             <div class="header">
                 <h2>📈 LOF市场每日汇总</h2>
-                <p style="margin: 5px 0 0 0; font-size: 14px;">
-                    {self._get_current_time()}
-                </p>
+                <p>{self._get_current_time()}</p>
             </div>
-            
             <div class="stats">
                 <div class="stat-card">
-                    <div class="stat-label">总LOF数量</div>
+                    <div>总LOF数量</div>
                     <div class="stat-value">{total_count}</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">鸡腿机会</div>
+                    <div>鸡腿机会</div>
                     <div class="stat-value" style="color: #dc2626;">{premium_count}</div>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-label">最高溢价率</div>
-                    <div class="stat-value" style="color: #f59e0b;">{max_premium:.2f}%</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-label">机会占比</div>
-                    <div class="stat-value" style="color: #10b981;">
-                        {(premium_count / total_count * 100) if total_count > 0 else 0:.1f}%
-                    </div>
-                </div>
             </div>
-            
-            <div class="top-list">
-                <h3 style="margin-top: 0;">🏆 TOP 5 高溢价基金</h3>
+            <h3>🏆 TOP 5 高溢价基金</h3>
         """
         
-        # 添加TOP基金
         for i, fund in enumerate(top_funds[:5], 1):
-            fund_code = fund.get('基金代码', fund.get('fund_code', ''))
             fund_name = fund.get('基金名称', fund.get('fund_name', ''))
             premium = fund.get('溢价率(%)', fund.get('premium_rate', 0))
-            
-            html += f"""
-                <div class="top-item">
-                    <strong>{i}. {fund_name}</strong> ({fund_code})<br>
-                    <span style="color: #dc2626; font-size: 18px; font-weight: bold;">
-                        溢价率：{premium:.2f}%
-                    </span>
-                </div>
-            """
+            html += f"<p><strong>{i}. {fund_name}</strong> - {premium:.2f}%</p>"
         
-        html += """
-            </div>
-            
-            <div style="background: #dbeafe; padding: 15px; border-radius: 8px; margin-top: 20px;">
-                💡 <strong>提示</strong><br>
-                及时关注申购赎回状态变化，把握套利时机
-            </div>
-            
-            <div style="text-align: center; margin-top: 30px; color: #6b7280; font-size: 12px;">
-                <p>LOF套利监控系统 Pro</p>
-                <p>Powered by Akshare + Streamlit</p>
-            </div>
-        </body>
-        </html>
-        """
-        
+        html += "</body></html>"
         return html
     
     def send_test_message(self) -> bool:
-        """
-        发送测试消息
-        
-        Returns:
-            bool: True=成功，False=失败
-        """
+        """发送测试消息"""
         title = "🧪 PushPlus 测试消息"
-        
         content = f"""
         <h2>✅ 推送功能测试成功！</h2>
         <p>🕐 测试时间：{self._get_current_time()}</p>
-        <p>📱 推送渠道：微信</p>
-        <hr>
         <p>如果您收到此消息，说明 PushPlus 推送已正常配置。</p>
-        <p>您将会收到以下类型的消息：</p>
-        <ul>
-            <li>🍗 LOF套利机会提醒（溢价率≥5%）</li>
-            <li>📊 每日市场汇总（可选）</li>
-            <li>⚠️ 重要系统通知</li>
-        </ul>
-        <hr>
-        <p style="color: #666; font-size: 12px;">
-            LOF套利监控系统 Pro v3.0.0
-        </p>
         """
-        
         return self.send_message(title, content, template="html")
-    
-    # ==================== 工具方法 ====================
     
     def _get_current_time(self) -> str:
         """获取当前时间字符串"""
@@ -564,45 +417,13 @@ def test_pushplus():
     
     if pusher.is_configured():
         print("✅ PushPlus 已配置")
-        
-        # 测试推送
-        print("\n📤 发送测试消息...")
         if pusher.send_test_message():
             print("✅ 测试消息发送成功！")
-            print("💡 请检查微信是否收到推送")
         else:
             print("❌ 测试消息发送失败")
-        
-        # 测试套利提醒
-        print("\n📤 测试套利提醒...")
-        test_opportunities = [
-            {
-                '基金代码': '160636',
-                '基金名称': '鹏华中证A股资源产业LOF',
-                '场内价格': 1.500,
-                '基金净值': 1.400,
-                '溢价率(%)': 7.14,
-                '场内成交额(万)': 100.0
-            },
-            {
-                '基金代码': '501018',
-                '基金名称': '南方原油LOF',
-                '场内价格': 1.200,
-                '基金净值': 1.100,
-                '溢价率(%)': 9.09,
-                '场内成交额(万)': 200.0
-            }
-        ]
-        
-        if pusher.send_arbitrage_alert(test_opportunities):
-            print("✅ 套利提醒发送成功！")
-        else:
-            print("❌ 套利提醒发送失败")
-    
     else:
         print("❌ PushPlus 未配置")
         print("💡 请配置环境变量：PUSHPLUS_TOKEN")
-        print("📝 获取Token：https://www.pushplus.plus/")
 
 
 if __name__ == "__main__":
