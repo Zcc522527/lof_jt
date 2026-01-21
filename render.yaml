@@ -2,15 +2,16 @@ services:
   - type: web
     name: lof-arbitrage-pro
     runtime: python
-    plan: free  # 使用免费套餐
+    plan: free
     branch: main
+    # 指定 Python 3.11
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: streamlit run app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.0
+        value: 3.11.0  # 改为 3.11.0
       - key: SUPABASE_URL
-        sync: false  # 需要在 Dashboard 手动配置
+        sync: false
       - key: SUPABASE_KEY
         sync: false
       - key: PUSHPLUS_TOKEN
