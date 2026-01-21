@@ -1,7 +1,7 @@
 # Streamlit 核心
 streamlit==1.31.0
 
-# 数据处理
+# 数据处理（固定兼容版本）
 pandas==2.1.4
 numpy==1.26.3
 
@@ -13,6 +13,7 @@ requests==2.31.0
 
 # 数据库
 supabase==2.3.0
+postgrest==0.13.2
 
 # HTML 解析
 lxml==5.1.0
@@ -23,3 +24,4 @@ python-dotenv==1.0.0
 
 # 其他依赖
 typing-extensions==4.9.0
+protobuf==4.25.3
