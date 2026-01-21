@@ -1,9 +1,5 @@
 """
-LOF套利监控系统 Pro - Akshare多数据源版
-支持数据源：集思录（优先）、东方财富、天天基金
-功能：实时溢价监控 + 数据库存储 + 消息推送
-作者：AC_AI
-版本：v3.0.0
+LOF套利监控系统 Pro - Render 部署版
 """
 
 import streamlit as st
@@ -17,7 +13,48 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import time
 
-# 导入自定义模块
+# ======================== Render 环境变量加载 ========================
+# Render 会自动注入环境变量，无需 .env 文件
+
+# 检查必要的环境变量
+REQUIRED_ENV_VARS = {
+    'SUPABASE_URL': os.environ.get('SUPABASE_URL'),
+    'SUPABASE_KEY': os.environ.get('SUPABASE_KEY')
+}
+
+# 可选环境变量
+OPTIONAL_ENV_VARS = {
+    'PUSHPLUS_TOKEN': os.environ.get('PUSHPLUS_TOKEN')
+}
+
+# 日志配置检查
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+# 显示环境变量加载状态
+logger.info("=" * 60)
+logger.info("🚀 LOF套利监控系统启动中...")
+logger.info("=" * 60)
+
+for key, value in REQUIRED_ENV_VARS.items():
+    if value:
+        logger.info(f"✅ {key}: 已加载")
+    else:
+        logger.warning(f"⚠️ {key}: 未配置（部分功能受限）")
+
+for key, value in OPTIONAL_ENV_VARS.items():
+    if value:
+        logger.info(f"✅ {key}: 已加载")
+    else:
+        logger.info(f"ℹ️ {key}: 未配置（可选功能）")
+
+logger.info("=" * 60)
+
+# 导入自定义模块（保持原有代码不变）
 from database import SupabaseDB
 from pusher import PushPlusNotifier
 from akshare_sources import (
@@ -26,6 +63,9 @@ from akshare_sources import (
     akshare_multi,
     AKSHARE_AVAILABLE
 )
+
+# ... 后续代码保持不变 ...
+
 
 # ======================== 配置日志 ========================
 logging.basicConfig(
