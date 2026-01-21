@@ -6,66 +6,30 @@ streamlit==1.31.0
 # 数据处理
 pandas==2.1.4
 numpy==1.26.3
-python-dateutil==2.8.2
-pytz==2024.1
 
 # ==================== 数据源 ====================
 
-# Akshare（使用当前最新版本）
+# Akshare（金融数据）
 akshare==1.18.19
 
 # HTTP 请求
 requests==2.31.0
-urllib3==2.1.0
 
 # ==================== 数据库 ====================
 
-# Supabase 客户端
-supabase==2.3.0
-
-# Supabase 依赖
-postgrest==0.13.2
-storage3==0.7.3
-gotrue==2.2.0
-realtime==1.0.3
-supafunc==0.3.3
+# Supabase（不固定子依赖版本，让它自动解析）
+supabase>=2.3.0
 
 # ==================== 解析与工具 ====================
 
 # HTML/XML 解析
-lxml==5.1.0
-beautifulsoup4==4.12.3
-html5lib==1.1
-
-# JSON/数据序列化
-simplejson==3.19.2
+lxml>=5.0.0
+beautifulsoup4>=4.12.0
 
 # 环境变量
-python-dotenv==1.0.0
-
-# ==================== Akshare 依赖 ====================
-
-# 网络请求（Akshare 依赖）
-aiohttp==3.9.3
-httpx==0.26.0
-
-# 数据处理（Akshare 依赖）
-openpyxl==3.1.2
-xlrd==2.0.1
-py-mini-racer==0.6.0
-
-# 其他工具
-tqdm==4.66.1
-pypinyin==0.50.0
-websocket-client==1.7.0
+python-dotenv>=1.0.0
 
 # ==================== 其他依赖 ====================
 
 # 类型提示
-typing-extensions==4.9.0
-
-# Protobuf（Streamlit 依赖）
-protobuf==4.25.3
-
-# 加密
-pycryptodome==3.20.0
+typing-extensions>=4.9.0
